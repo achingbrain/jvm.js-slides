@@ -3,7 +3,13 @@ jvm.js-slides
 
 Meteor slideshow from my presentation on jvm.js
 
-To run:
+Demo
+----
+
+[http://jvm-js-slides.meteor.com/](http://jvm-js-slides.meteor.com/).  Hope you're running a modern browser.
+
+To run
+------
 
 1. Install Meteor
 
@@ -19,4 +25,4 @@ To run:
 
 		$ meteor
 
-4. Open [http://localhost:3000](http://localhost:3000) in Chrome
+4. Open [http://localhost:3000](http://localhost:3000) in a modern browser.
