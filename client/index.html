@@ -1,0 +1,808 @@
+<head>
+	<meta charset="utf-8" />
+	<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+	<title>Hacking bytecode for fun and profit</title>
+
+	<link href="slideshow.css" rel="stylesheet" />
+	<link href="theme.css" rel="stylesheet" />
+	<link href="talk.css" rel="stylesheet" />
+	<script src="lib/prefixfree.min.js"></script>
+  <script src="lib/buzz.v1.0.5.js"></script>
+</head>
+
+<body>
+	<section>
+		<header class="slide" id="pre-intro">
+			<h2 style="margin-top: 200px; text-align: center;">Slideshow:</h2>
+			<h2>http://10.153.10.169</h2>
+			<h2><a href="http://10.153.10.169/examples.zip">Examples</a></h2>
+		</header>
+	</section>
+	<section>
+		<header class="slide" id="intro">
+			<h1 style="margin-top: -15%">HACKING BYTECODE<br />FOR FUN AND PROFIT</h1>
+		</header>
+	</section>
+	<section>
+		<header class="slide" id="bytecode-101">
+			<h1>Bytecode 101</h1>
+		</header>
+
+		<section class="slide" id="developers-view">
+			<h2>A developer's view</h2>
+			<img style="display: block; margin: auto" src="/slides/bytecode-developer.png" width="100%" />
+		</section>
+
+		<section class="slide" id="developers-reaction">
+			<h2>A developer's reaction</h2>
+			<img style="display: block; margin: auto" src="/slides/facepalm.jpg" />
+		</section>
+
+		<section class="slide" id="joy-of-hex">
+			<h2>The joy of hex</h2>
+			<img style="display: block; margin: auto" src="/slides/bytecode-hex-1.png" width="100%" />
+		</section>
+
+		<section class="slide" id="bytecode-overview">
+			<h2>Huh?</h2>
+			<p>Instructions executed by the JVM</p>
+			<ul>
+				<li class="delayed">One byte long</li>
+				<li class="delayed">256 possible values (it's a byte, innit?)</li>
+				<li class="delayed">~200 or so currently used</li>
+				<li class="delayed">Instructions are simple operations</li>
+				<li class="delayed">Can have arguments as subsequent bytes</li>
+			</ul>
+		</section>
+
+		<section class="slide" id="integer-addition">
+			<h2>Integer addition</h2>
+			<p>Mnemonic: <code>iadd</code></p>
+			<p class="delayed">Opcode: <code>0x60</code></p>
+			<p class="delayed">Pops the top two values from the stack, adds them togther and pushes the result onto the stack</p>
+			<pre class="delayed"><code lang="javascript">a + b;// where a and b are both ints</code></pre>
+			<p class="delayed">The prefix 'i' means we're operating on an int.</p>
+		</section>
+
+		<section class="slide" id="array-load">
+			<h2>Array load</h2>
+			<p>Mnemonic: <code>aaload</code></p>
+			<p>Opcode: <code>0x32</code></p>
+			<p class="delayed">Pops an array reference and an index from the stack, loads the entry signified by the index and pushes it onto the stack</p>
+			<pre class="delayed"><code lang="javascript">a[0]; // where a is an Object[]</code></pre>
+			<p class="delayed">The prefix 'a' means we're operating on an object reference.</p>
+		</section>
+
+		<section class="slide" id="equality">
+			<h2>Equality</h2>
+			<p>Mnemonic: <code>if_acmpeq</code></p>
+			<p>Opcode: <code>0xA5</code></p>
+			<p>Args: <code>branchbyte1, branchbyte2</code></p>
+			<p class="delayed">If top two stack entries are equal, jump to <code>branchbyte1 &lt;&lt; 8 + branchbyte2</code></p>
+			<pre class="delayed"><code lang="javascript">if(a == b)</code></pre>
+			<p class="delayed">branchbyteN are Uint8 so the above really means Uint16</p>
+			<p class="delayed">E.g: <code>... A5 00 01 ...</code></p>
+		</section>
+
+		<section class="slide" id="why-not-o">
+			<h2>Interal type names</h2>
+			<p>Why 'a' and not 'o' for object?</p>
+			<p class="delayed">No idea.</p>
+			<p class="delayed">On the subject of JVM internal names:</p>
+		</section>
+
+		<section class="slide" title="Interal type names" id="internal-types">
+			<ul>
+				<li>Z: boolean</li>
+				<li>B: byte</li>
+				<li>C: char</li>
+				<li>S: short</li>
+				<li>J: long</li>
+				<li>F: float</li>
+				<li>D: double</li>
+				<li>V: void</li>
+				<li>a: Object reference</li>
+				<li>L: classes - e.g. Ljava/lang/String;</li>
+			</ul>
+		</section>
+
+		<section class="slide" id="goto">
+			<h2>Goto</h2>
+			<p>Mnemonic: <code>goto #</code></p>
+			<p>Opcode: <code>0xA7</code></p>
+			<p>Args: <code>branchbyte1, branchbyte2</code></p>
+			<p class="delayed">Jump to offset specified as (argment + currentInstructionIndex)</p>
+			<pre class="delayed"><code lang="javascript">while(/* condition */) {
+  // do some work
+}</code></pre>
+			<p class="delayed">Considered harmful?</p>
+		</section>
+
+		<section class="slide" id="put-it-together">
+			<h2>All together now</h2>
+			<pre><code lang="javascript">while(a == b) {
+  a++;
+}</code></pre><br />
+			<pre><code lang="javascript">0: iload_1
+1: iload_2
+2: if_icmpne 11
+5: iinc 1, 1
+8: goto 0</code></pre>
+		</section>
+
+		<section class="slide" id="loading-fields">
+			<h2>Beyond primitives</h2>
+			<p>Loading fields:</p>
+			<pre><code lang="javascript">1: getfield #3; //Field foo:I</code></pre>
+			<p class="delayed">what does #3 mean?</p>
+			<p class="delayed">The constant pool</p>
+			<ul>
+				<li class="delayed">Field definitions</li>
+				<li class="delayed">Method definitions</li>
+				<li class="delayed">Class definitions</li>
+				<li class="delayed">Strings, ints, longs, etc</li>
+				<li class="delayed">NameAndType definitions</li>
+			</ul>
+		</section>
+
+		<section class="slide" id="class-file-structure">
+			<h2>.class FILE STRUCTURE</h2>
+			<img style="display: block; margin: auto; height: 15em;" src="/slides/class-file-structure.png" />
+		</section>
+
+		<section class="slide" id="constant-pool">
+			<h2>The constant pool</h2>
+			<pre><code lang="javascript">...
+#3 = Field #14.#45; // MyClass.foo:I
+...
+#14 = class #51; // MyClass
+...
+#26 = Asciz foo;
+#27 = Asciz I;
+...
+#45 = NameAndType #26:#27;// foo:I</code></pre>
+		</section>
+	</section>
+
+	<section>
+		<header class="slide" id="examining-bytecode">
+			<h1>Examining bytecode</h1>
+		</header>
+
+		<section class="slide" id="javap">
+			<h2>javap</h2>
+			<pre><code lang="javascript">$ javap -v -p SimpleExample
+
+Compiled from "SimpleExample.java"
+public class SimpleExample extends java.lang.Object
+  SourceFile: "SimpleExample.java"
+  minor version: 0
+  major version: 50
+  Constant pool:
+const #1 = Method	#25.#44;	//  java/lang/Object."<init>":()V
+...</code></pre>
+		</section>
+
+		<section class="slide" id="example.java">
+			<h2>Example.java</h2>
+			<pre><code lang="javascript">public int addition(int a, int b) {
+	return a + b;
+}</code></pre>
+		</section>
+
+		<section class="slide" id="javap-example.java">
+			<h2>javap -v Example</h2>
+			<pre><code lang="javascript">public static int addition(int, int);
+  Code:
+   0:	iload_0
+   1:	iload_1
+   2:	iadd
+   3:	ireturn</code></pre>
+		</section>
+
+	</section>
+
+	<section>
+		<header class="slide" id="executing-bytecode">
+			<h1>Executing bytecode</h1>
+		</header>
+
+		<section class="slide" id="frames">
+			<h2>A frame</h2>
+			<p>All bytecode is executed in a frame:</p>
+			<img style="display: block; margin: auto; height: 15em;" src="/slides/frame.png" />
+		</section>
+
+		<section class="slide" id="frame-notes">
+			<h2>A frame</h2>
+			<p>All bytecode is executed in a frame:</p>
+			<ul>
+				<li class="delayed">Variables are loaded from the local variable table</li>
+				<li class="delayed">They are placed on the stack</li>
+				<li class="delayed">They are operated on</li>
+				<li class="delayed">And finally returned to the local varible table</li>
+				<li class="delayed">Variables can be primitive types or object references</li>
+			</ul>
+		</section>
+
+		<section class="slide" id="longs-and-doubles">
+			<h2>Longs and doubles</h2>
+			<p>Consider:</p>
+			<pre style="font-size: 30px"><code language="javascript">public static long add(long, long);
+ 0: lload_0
+ 1: lload_2
+ 2: ladd
+ ...
+ 			</code></pre>
+ 			<p class="delayed">64bit primitives take two slots in the variable table</p>
+ 			<p class="delayed">We can write to the variable table</p>
+ 			<p class="delayed">Writing to 64bit primitives is non-atomic</p>
+ 			<p class="delayed">WAT!</p>
+		</section>
+
+		<section class="slide" id="longs-and-doubles-wat">
+			<h2>Longs and doubles</h2>
+			<p>From JLS section 17.7:</p>
+			<p class="delayed" style="color: yellow">&quot;A single write to a long or double value is treated as two separate writes: one to each 32-bit half. This can result in a situation where a thread sees the first 32 bits of a 64-bit value from one write, and the second 32 bits from another write.&quot;</p>
+			<p class="delayed">Writes and reads of volatile long and double values are always atomic.</p>
+		</section>
+
+		<section class="slide" id="invoking-methods">
+			<h2>Invoking methods</h2>
+			<p>The java:</p>
+			<pre><code lang="javascript">int l = this.s.length();</code></pre>
+			<p>Translates to the bytecode:</p>
+			<pre><code lang="javascript">8:	aload_1
+9:	getfield #13; //Field s:Ljava/lang/String;
+12:	invokeinterface	#16, 1; //InterfaceMethod java/lang/CharSequence.length:()I
+17:	istore_2</code></pre>
+			<p>A new frame will be created for the <code>length</code> invocation</p>
+		</section>
+
+		<section class="slide" id="method-invocation-types">
+			<h2>Invoking methods</h2>
+			<p>Different bytecode:</p>
+			<ul>
+				<li class="delayed"><code>invokevirtual</code> - normal object method</li>
+				<li class="delayed"><code>invokestatic</code> - static class method</li>
+				<li class="delayed"><code>invokespecial</code> - constructor method</li>
+				<li class="delayed"><code>invokeinterface</code> - interface method</li>
+				<li class="delayed"><code>invokedynamic</code> - not used in Java</li>
+			</ul>
+		</section>
+	</section>
+
+	<section>
+		<header class="slide" id="language-interop">
+			<h1>Language interop</h1>
+		</header>
+
+		<section class="slide" id="runner">
+			<h2>Runner.java</h2>
+			<pre style="font-size: 30px"><code language="javascript">public class Runner {
+  public static void main(String[] args) {
+    int arg1 = 10;
+    int arg2 = 5;
+
+    Example example = new Example();
+
+    int result = example.addition(arg1, arg2);
+
+    System.out.println("Total was " + result);
+  }
+}</code></pre>
+		</section>
+
+		<section class="slide" id="java">
+			<h2>Java</h2>
+			<pre><code language="javascript">public class Example {
+	public int addition(int a, int b) {
+		return a + b;
+	}
+}</code></pre>
+		</section>
+
+		<section class="slide" id="java-interop">
+			<iframe src="jvm/index.html"></iframe>
+		</section>
+
+		<section class="slide" id="scala">
+			<h2>Scala</h2>
+			<pre><code language="javascript">class Example() {
+ def addition(a: Int, b: Int): Int = {
+  return a + b
+ }
+}</code></pre>
+		</section>
+
+		<section class="slide" id="scala-interop">
+			<iframe src="jvm/index.html"></iframe>
+		</section>
+
+		<section class="slide" id="clojure">
+			<h2>Clojure - example.clj</h2>
+			<pre><code language="javascript">(ns example
+    (:gen-class))
+
+(defn addition [x y]
+        (+ x x))</code></pre>
+			<p>N.b. Clojure promotes ints to longs</p>
+		</section>
+
+		<section class="slide" id="clojure-addition">
+			<h2>Example$addtion</h2>
+			<pre><code language="javascript">public Object invoke(Object, Object);
+ 0: aload_1
+ 1: aload_1
+ 2: aconst_null
+ 3: astore_1
+ 4: invokestatic #34;
+   //Method clojure/lang/Numbers
+     .add:(Object;Object;)Number;
+ 7: areturn</code></pre>
+		</section>
+
+		<section class="slide" id="clojure-add">
+			<h2>Numbers$add</h2>
+			<pre style="font-size: 24px"><code language="javascript">public static Number add(Object, Object);
+ 0: aload_0
+ 1: invokestatic #2;
+   //Method ops:(Ljava/lang/Object;)
+       Lclojure/lang/Numbers$Ops;
+ /* invoke ops for arg 1 too */
+ 8: invokeinterface #13, 2;
+   //InterfaceMethod clojure/lang/Numbers$Ops
+     .combine:(Lclojure/lang/Numbers$Ops;)
+       Lclojure/lang/Numbers$Ops;
+ /* cast both to java.lang.Number */
+ 21: invokeinterface #14, 3;
+   //InterfaceMethod
+     clojure/lang/Numbers$Ops
+       .add:(Ljava/lang/Number;Ljava/lang/Number;)
+         Ljava/lang/Number;
+ 26: areturn</code></pre>
+		</section>
+
+		<section class="slide" id="clojure-you-what-now">
+			<h2>You what now?!</h2>
+			<ol>
+				<li class="delayed">Get the number operations for argument 0</li>
+				<li class="delayed">Get the number operations for argument 1</li>
+				<li class="delayed">Combine them</li>
+				<li class="delayed">Cast argument 0 to java.lang.Number</li>
+				<li class="delayed">Cast argument 1 to java.lang.Number</li>
+				<li class="delayed">Invoke the addition method on the combined ops</li>
+				<li class="delayed">Return the result</li>
+			</ol>
+		</section>
+
+		<section class="slide" id="clojure-ops">
+			<h2>Numbers$ops</h2>
+			<pre style="font-size: 24px"><code language="javascript">static clojure.lang.Numbers$Ops ops(Object);
+ 0: aload_0
+ 1: invokevirtual #76; //Method getClass:()Ljava/lang/Class;
+ 4: astore_1
+ 5: aload_1
+ 6: ldc_w #77; //class java/lang/Long
+ 9: if_acmpne 16
+ 12: getstatic #78; //Field LONG_OPS:Lclojure/lang/Numbers$LongOps;
+ 15: areturn
+ 16: aload_1
+ 17: ldc_w	#48; //class java/lang/Double
+ 20: if_acmpne 27
+ 23: getstatic #79; //Field DOUBLE_OPS:Lclojure/lang/Numbers$DoubleOps;
+ 26: areturn
+ ... etc for other types</code></pre>
+		</section>
+
+		<section class="slide" id="clojure-actually-add">
+			<h2>Numbers$LongOps</h2>
+			<pre style="font-size: 24px"><code language="javascript">public final Number add(Number, Number);
+ 0: aload_1
+ 1: invokevirtual #7; //Method java/lang/Number.longValue:()J
+ 4: aload_2
+ 5: invokevirtual #7; //Method java/lang/Number.longValue:()J
+ 8: invokestatic #8; //Method clojure/lang/Numbers.add:(JJ)J
+ 11: invokestatic #9; //Method clojure/lang/Numbers.num:(J)Ljava/lang/Number;
+ 14: areturn</code></pre>
+		</section>
+
+		<section class="slide" id="clojure-really-add">
+			<h2>Numbers$add</h2>
+			<pre style="font-size: 16px"><code language="javascript">public static long add(long, long);
+ 0: lload_0
+ 1: lload_2
+ 2: ladd
+ 3: lstore	4
+ 5: lload	4
+ 7: lload_0
+ 8: lxor
+ 9: lconst_0
+ 10: lcmp
+ 11: ifge	28
+ 14: lload	4
+ 16: lload_2
+ 17: lxor
+ 18: lconst_0
+ 19: lcmp
+ 20: ifge	28
+ 23: invokestatic #169; //Method throwIntOverflow:()I
+ 26: i2l
+ 27: lreturn
+ 28: lload	4
+ 30: lreturn</code></pre>
+		</section>
+
+<!--
+		<section class="slide" id="clojure-bytecode">
+			<h2>Clojure - example$addition.class</h2>
+			<iframe src="jvm/index.html"></iframe>
+		</section> -->
+	</section>
+
+	<section>
+
+		<section class="slide" id="rabbit-hole">
+			<h2>Down the rabbit hole</h2>
+			<img style="display: block; margin: auto; height: 15em;" src="/slides/rabbit-hole.jpg" />
+		</section>
+
+		<section class="slide" id="rabbit-hole-huh">
+			<h2>Huh?</h2>
+			<img style="display: block; margin: auto; height: 15em;" src="/slides/rabbit-hole-g.jpg" />
+		</section>
+
+		<section class="slide" id="g1">
+			<h2>?!?!</h2>
+			<img style="display: block; margin: auto; height: 15em;" src="/slides/g1.jpg" />
+		</section>
+
+		<section class="slide" id="g2">
+			<h2>Oh god</h2>
+			<img style="display: block; margin: auto; height: 15em;" src="/slides/g2.jpg" />
+		</section>
+
+		<section class="slide" id="g3">
+			<h2>Oh god!</h2>
+			<img style="display: block; margin: auto; height: 15em;" src="/slides/g3.jpg" />
+		</section>
+
+		<section class="slide" id="g4">
+			<h2>OH God!</h2>
+			<img style="display: block; margin: auto; height: 15em;" src="/slides/g4.jpg" />
+		</section>
+
+		<section class="slide" id="g5">
+			<h2>OH GOD!</h2>
+			<img style="display: block; margin: auto; height: 15em;" src="/slides/g5.jpg" />
+		</section>
+
+		<section class="slide" id="unicorn">
+			<h2>...</h2>
+			<img style="display: block; margin: auto; height: 15em;" src="/slides/unicorn-chaser.jpg" />
+		</section>
+	</section>
+
+	<section>
+		<header class="slide" id="examples">
+			<h1>Some more examples</h1>
+		</header>
+
+		<section class="slide" id="string-concatenation">
+			<h2>String concatenation</h2>
+			<pre style="font-size: 36px"><code language="javascript">public static void main(String[] args) {
+  String foo = "";
+
+  for(int i = 0; i &lt; args.length; i++) {
+    foo += args;
+  }
+
+  System.out.println(args);
+}</code></pre>
+		</section>
+
+		<section class="slide" id="string-concatenation-bytecode">
+			<h2>String concatenation</h2>
+			<pre style="font-size: 18px"><code language="javascript">0:  ldc #2; //String
+2:  astore_1
+3:  iconst_0
+4:  istore_2
+5:  iload_2
+6:  aload_0
+7:  arraylength
+8:  if_icmpge 36
+11: new #3; //class java/lang/StringBuilder
+14: dup
+15: invokespecial #4; //Method java/lang/StringBuilder."&lt;init&gt;":()V
+18: aload_1
+19: invokevirtual #5; //Method java/lang/StringBuilder.append:(Ljava/lang/String;)Ljava/lang/StringBuilder;
+22: aload_0
+23: invokevirtual #6; //Method java/lang/StringBuilder.append:(Ljava/lang/Object;)Ljava/lang/StringBuilder;
+26: invokevirtual #7; //Method java/lang/StringBuilder.toString:()Ljava/lang/String;
+29: astore_1
+30: iinc 2, 1
+33: goto 5
+36: getstatic #8; //Field java/lang/System.out:Ljava/io/PrintStream;
+39: aload_0
+40: invokevirtual #9; //Method java/io/PrintStream.println:(Ljava/lang/Object;)V
+43: return</code></pre>
+		</section>
+
+		<section class="slide" id="string-concatenation-advice">
+			<h2>String concatenation</h2>
+			<p>Not all our checkstyle rules are stupid</p>
+		</section>
+
+		<section class="slide" id="string-concatenation-one-does-not">
+			<h2>String concatenation</h2>
+			<img style="display: block; margin: auto; height: 15em;" src="/slides/one-does-not.jpg" />
+		</section>
+
+		<section class="slide" id="final-variable-not-final">
+			<h2>Final variables</h2>
+			<pre style="font-size: 36px"><code language="javascript">public int foo(int i) {
+  int n = 10;
+
+  return i + n;
+}</code></pre>
+		</section>
+
+		<section class="slide" id="final-variable-not-final-bytecode">
+			<h2>Final variables</h2>
+			<pre style="font-size: 36px"><code language="javascript">0: bipush 10
+2: istore_2
+3: iload_1
+4: iload_2
+5: iadd
+6: ireturn</code></pre>
+		</section>
+
+		<section class="slide" id="final-variable-with-final">
+			<h2>Final variables</h2>
+			<pre style="font-size: 36px"><code language="javascript">public int foo(final int i) {
+  final int n = 10;
+
+  return i + n;
+}</code></pre>
+			<p class="delayed">We have made the variable and the argument final</p>
+		</section>
+
+		<section class="slide" id="final-variable-with-final-bytecode">
+			<h2>Final variables</h2>
+			<pre style="font-size: 36px"><code language="javascript">0: iload_1
+1: bipush 10
+3: iadd
+4: ireturn</code></pre>
+			<p class="delayed">Final variable has been optimised to a constant</p>
+		</section>
+
+		<section class="slide" id="final-variable-not-final-field">
+			<h2>Final variables</h2>
+			<pre style="font-size: 36px"><code language="javascript">private int n = 10;
+
+public int foo(int i) {
+  return i + n;
+}</code></pre>
+		</section>
+
+		<section class="slide" id="final-variable-not-final-field-bytecode">
+			<h2>Final variables</h2>
+			<pre style="font-size: 36px"><code language="javascript">0: iload_1
+1: aload_0
+2: getfield #2; //Field n:I
+5: iadd
+6: ireturn</code></pre>
+		</section>
+
+		<section class="slide" id="final-variable-with-final-field">
+			<h2>Final variables</h2>
+			<pre style="font-size: 36px"><code language="javascript">private final int n = 10;
+
+public int foo(final int i) {
+  return i + n;
+}</code></pre>
+			<p class="delayed">We have made the field and the argument final</p>
+		</section>
+
+		<section class="slide" id="final-variable-with-final-field-bytecode">
+			<h2>Final variables</h2>
+			<pre style="font-size: 36px"><code language="javascript">0: iload_1
+1: bipush 10
+3: iadd
+4: ireturn</code></pre>
+			<p class="delayed">Field reference has been optimised to a constant</p>
+			<p class="delayed">Making the argument final has done nothing</p>
+		</section>
+
+		<section class="slide" id="inner-classes">
+			<h2>Inner classes</h2>
+			<pre style="font-size: 36px"><code language="javascript">public class WithInner {
+  private int n = 10;
+
+  public Runnable foo(final int i) {
+    return new Runnable() {
+      public void run() {
+        n += i;
+      }
+    };
+  }
+}</code></pre>
+		</section>
+
+		<section class="slide" id="inner-classes-notes">
+			<h2>Inner classes</h2>
+			<p>Anonymous inner class has reference to outer class</p>
+			<p class="delayed">How?</p>
+		</section>
+
+		<section class="slide" id="inner-classes-bytecode">
+			<h2>Inner classes</h2>
+			<p>Two classes generated</p>
+			<pre style="font-size: 18px" class="delayed" style="font-size: 36px"><code language="javascript">public class WithInner extends java.lang.Object {
+private int n;
+
+public java.lang.Runnable foo(int);
+ 0:	new	#3; //class WithInner$1
+ 3:	dup
+ 4:	aload_0
+ 5:	iload_1
+ 6:	invokespecial #4; //Method WithInner$1."&lt;init&gt;":(LWithInner;I)V
+ 9:	areturn
+
+static int access$012(WithInner, int);
+ 0:	aload_0
+ 1:	dup
+ 2:	getfield #1; //Field n:I
+ 5:	iload_1
+ 6:	iadd
+ 7:	dup_x1
+ 8:	putfield #1; //Field n:I
+ 11: ireturn
+}</code></pre>
+		</section>
+
+		<section class="slide" id="inner-classes-other-bytecode">
+			<h2>Inner classes</h2>
+			<p>WithInner$1</p>
+			<pre style="font-size: 20px" class="delayed" style="font-size: 36px"><code language="javascript">class WithInner$1 extends java.lang.Object implements java.lang.Runnable{
+final int val$i;
+final WithInner this$0;
+
+WithInner$1(WithInner, int);
+ /* constructor ommited, just assigns fields */
+
+public void run();
+ 0:  aload_0
+ 1:  getfield #1; //Field this$0:LWithInner;
+ 4:  aload_0
+ 5:  getfield #2; //Field val$i:I
+ 8:  invokestatic #4; //Method WithInner.access$012:(LWithInner;I)I
+ 11: pop
+ 12: return
+}</code></pre>
+		</section>
+
+		<section class="slide" id="inner-classes-notes2">
+			<h2>Inner classes</h2>
+			<ul>
+				<li>Primitive argument has to be immutable as it's copied into the child class</li>
+				<li class="delayed">A change to the argument value would not be noticed by the inner class</li>
+				<li class="delayed">What about objects?</li>
+				<li class="delayed">Would copying by reference make a difference</li>
+			</ul>
+		</section>
+
+		<section class="slide" id="inner-classes-object">
+			<h2>Inner classes</h2>
+			<pre style="font-size: 20px" style="font-size: 36px"><code language="javascript">public class WithInner {
+  private AtomicInteger n = new AtomicInteger(10);
+
+  public Runnable foo(final AtomicInteger i) {
+    return new Runnable() {
+      public void run() {
+        n.addAndGet(i.get());
+    }
+  };
+}</code></pre>
+		</section>
+
+		<section class="slide" id="inner-classes-object-bytecode">
+			<h2>Inner classes</h2>
+			<pre style="font-size: 20px" style="font-size: 36px"><code language="javascript">public class WithInner extends java.lang.Object{
+private java.util.concurrent.atomic.AtomicInteger n;
+
+public java.lang.Runnable foo(java.util.concurrent.atomic.AtomicInteger);
+  0: new #5; //class WithInner$1
+  3: dup
+  4: aload_0
+  5: aload_1
+  6: invokespecial #6; //Method WithInner$1."&lt;init&gt;":(LWithInner;Ljava/util/concurrent/atomic/AtomicInteger;)V
+  9: areturn
+
+static java.util.concurrent.atomic.AtomicInteger access$000(WithInner);
+  0: aload_0
+  1: getfield #1; //Field n:Ljava/util/concurrent/atomic/AtomicInteger;
+  4: areturn
+}</code></pre>
+		</section>
+
+		<section class="slide" id="inner-classes-object-bytecode-other">
+			<h2>Inner classes</h2>
+			<pre style="font-size: 20px" style="font-size: 36px"><code language="javascript">class WithInner$1 extends java.lang.Object implements java.lang.Runnable{
+final java.util.concurrent.atomic.AtomicInteger val$i;
+final WithInner this$0;
+
+WithInner$1(WithInner, java.util.concurrent.atomic.AtomicInteger);
+  /* constructor ommited */
+
+public void run();
+  0:  aload_0
+  1:  getfield	#1; //Field this$0:LWithInner;
+  4:  invokestatic	#4; //Method WithInner.access$000:(LWithInner;)Ljava/util/concurrent/atomic/AtomicInteger;
+  7:  aload_0
+  8:  getfield	#2; //Field val$i:Ljava/util/concurrent/atomic/AtomicInteger;
+  11: invokevirtual	#5; //Method java/util/concurrent/atomic/AtomicInteger.get:()I
+  14: invokevirtual	#6; //Method java/util/concurrent/atomic/AtomicInteger.addAndGet:(I)I
+  17: pop
+  18: return
+}</code></pre>
+		</section>
+
+		<section class="slide" id="inner-classes-notes3">
+			<h2>Inner classes</h2>
+			<ul>
+				<li>Final still mandated by the compiler for object arguments</li>
+				<li class="delayed">Even though copying by reference means value always up to date</li>
+			</ul>
+		</section>
+
+		<section class="slide" id="inner-classes-notes4">
+			<h2>Inner classes</h2>
+			<ul>
+				<li>Java compiler generates extra methods</li>
+				<li class="delayed">Provides syntactic sugar</li>
+				<li class="delayed">References can catch out the unwary</li>
+				<li class="delayed">What if inner class was serialised?</li>
+				<li class="delayed">Outer class would need to implement Serializable too</li>
+			</ul>
+		</section>
+
+		<section class="slide" id="batman">
+			<video id="batman_video" preload="auto" loop="true" src="video/batman.mp4" width="100%" />
+		</section>
+
+		<section class="slide" id="autoboxing">
+			<h2>Autoboxing</h2>
+			<p>Automagically converts between primitives and their corresponding object types</p>
+			<pre class="delayed"><code language="javascript">public String foo(int i) {
+  Integer integer = i;
+
+  return integer.toString();
+}</code></pre>
+		</section>
+
+		<section class="slide" id="autoboxing-bytecode">
+			<h2>Autoboxing</h2>
+			<pre><code language="javascript">0: iload_1
+1: invokestatic	#2;
+      //Method java/lang/Integer.valueOf:(I)Ljava/lang/Integer;
+4: astore_2
+5: aload_2
+6: invokevirtual #3;
+      //Method java/lang/Integer.toString:()Ljava/lang/String;
+9: areturn</code></pre>
+		</section>
+
+	</section>
+	<footer class="slide" title="The End" id="the-end">
+		<h2>The end</h2>
+		<p>We made it.</p>
+		<p>Further reading:</p>
+		<ul style="font-size: 30px">
+			<li>Anton Arhipov on bytecode <a href="http://arhipov.blogspot.co.uk/2011/01/java-bytecode-fundamentals.html">http://arhipov.blogspot.co.uk/2011/01/java-bytecode-fundamentals.html</a></li>
+			<li>Peter Hagar on bytecode <a href="http://www.ibm.com/developerworks/ibm/library/it-haggar_bytecode/">http://www.ibm.com/developerworks/ibm/library/it-haggar_bytecode/</a></li>
+			<li>JavaScript JVM: <a href="http://github.com/achingbrain/jvm.js">http://github.com/achingbrain/jvm.js</a></li>
+			<li>Slide show engine: <a href="http://github.com/LeaVerou/CSSS">http://github.com/LeaVerou/CSSS</a></li>
+		</ul>
+	</footer>
+</body>

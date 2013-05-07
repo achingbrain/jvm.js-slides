@@ -1,0 +1,3 @@
+[submodule "public/jvm"]
+	path = public/jvm
+	url = ssh://ssh.github.com/achingbrain/jvm.js
